@@ -15,6 +15,7 @@ var crypto = require('crypto'),
 // External libraries.
 var Promise = require('bluebird'),
 	_ = require('lodash'),
+	NodeCache = require('node-cache'),
 	request = Promise.promisify(require('request'));
 
 // Options
@@ -122,6 +123,14 @@ _Client.prototype.request = function (requestOptions) {
 var _Server = function DHCryptoServer(options) {
 	this._dhKeys = null;
 	this._options = _.defaults(options, defaultOptions);
+};
+
+_Server.prototype.authentication = function () {
+	
+};
+
+_Server.prototype.verification = function () {
+	
 };
 
 module.exports = {
