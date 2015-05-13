@@ -75,7 +75,7 @@ _Client.prototype.establish = function () {
 			this._keyTimeout = setTimeout(function () {
 				this._established = false;
 				this._dhKey = null;
-				this._dhKey = 
+				this._serial = null;
 				this._keyTimeout = null;
 			}, (body.expires * 1000) - diff);
 
