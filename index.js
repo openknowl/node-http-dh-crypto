@@ -25,11 +25,12 @@ Promise.promisifyAll(NodeCache.prototype);
 var defaultOptions = {
 	dhGroupName: 'modp5',
 	cipherName: 'des-cbc',
-	method: 'POST',
+	//host: 'http://localhost:3000',
+	//establishPath: '/api/establish',
+	establishMethod: 'POST',
 	requestHeaderName: 'DH-Authentication',
 	ttl: 30,
-	// password: string
-	// establishUri: uri
+	//password: 'password'
 };
 
 /**
@@ -44,17 +45,19 @@ var _Client = function DHCryptoClient(options) {
 };
 
 _Client.prototype.establish = function () {
+	var _this = this;
+
 	// Generate Diffie-hellman key.
-	var clientDH = crypto.getDiffieHellman(this._options.dhGroupName);
+	var clientDH = crypto.getDiffieHellman(_this._options.dhGroupName);
 	clientDH.generateKeys();
 	
 	var startTime = new Date();
 
 	return request({
-		method: this._options.establishMethod, 
-		uri: this._options.establishUri,
+		method: _this._options.establishMethod, 
+		uri: _this._options.host + _this._options.establishPath,
 		form: {
-			publicKey: clientDH.getPublicKey()
+			publicKey: clientDH.getPublicKey('base64')
 		}
 	})
 	.spread(function (response, body) {
@@ -62,29 +65,29 @@ _Client.prototype.establish = function () {
 			body = JSON.parse(body);
 
 			// Update connection variables.
-			this._dhKey = clientDH.computeSecret(body.publicKey, null);
-			this._serial = body.serial;
-			this._established = true;
+			_this._dhKey = clientDH.computeSecret(body.publicKey, 'base64', 'base64');
+			_this._serial = body.serial;
+			_this._established = true;
 
 			// Set expiry timeout for connection variables..
-			if (!_.isNull(this._keyTimeout)) {
-				clearTimeout(this._keyTimeout);
+			if (!_.isNull(_this._keyTimeout)) {
+				clearTimeout(_this._keyTimeout);
 			}
 
 			var endTime = new Date();
 			var diff = endTime.valueOf() - startTime.valueOf() + 10;
 
-			this._keyTimeout = setTimeout(function () {
-				this._established = false;
-				this._dhKey = null;
-				this._serial = null;
-				this._keyTimeout = null;
+			_this._keyTimeout = setTimeout(function () {
+				_this._established = false;
+				_this._dhKey = null;
+				_this._serial = null;
+				_this._keyTimeout = null;
 			}, (body.expires * 1000) - diff);
 
 			// Return Diffie-hellman key and a serial.
 			return {
-				dhKey: this._dhKey,
-				serial: this._serial
+				dhKey: _this._dhKey,
+				serial: _this._serial
 			};
 		}
 
@@ -95,23 +98,28 @@ _Client.prototype.establish = function () {
 };
 
 _Client.prototype.request = function (requestOptions) {
-	var connection = (this._established)? Promise.resolve() : this.establish();
+	var _this = this;
+	
+	var connection = (_this._established)? Promise.resolve() : _this.establish();
 
 	return connection
 	.then(function () {
+		requestOptions.uri = _this._options.host + requestOptions.path;
+
 		// Create cipher string and replace post body.
-		var cipher = crypto.createCipher(this._options.cipherName, this._dhKey);
+		var cipher = crypto.createCipher(_this._options.cipherName, _this._dhKey);
 
 		var rawData = [
 			requestOptions.form || {},
-			this._options.password
+			_this._options.password
 		];
 
-		cipher.update(JSON.stringify(rawData), 'utf8');
+		var cipherText = cipher.update(JSON.stringify(rawData), 'utf8', 'base64');
+		cipherText += cipher.final('base64');
 		
 		requestOptions.form = {
-			cipher: cipher.final('base64'),
-			serial: this._serial
+			cipher: cipherText,
+			serial: _this._serial
 		};
 
 		// Send request with these options.
@@ -128,61 +136,69 @@ var _Server = function DHCryptoServer(options) {
 		stdTTL: this._options.ttl, 
 		checkperiod: this._options.ttl
 	});
+	this._serialRack = hat.rack();
 };
 
-_Server.prototype.authentication = function authenticationMiddleware(req, res) {
-	// Generate Diffie-hellman key.
-	var serverDH = crypto.getDiffieHellman(this._options.dhGroupName);
-	serverDH.generateKeys();
+_Server.prototype.authentication = function () {
+	var _this = this;
+	return function authenticationMiddleware(req, res, next) {
+		// Generate Diffie-hellman key.
+		var serverDH = crypto.getDiffieHellman(_this._options.dhGroupName);
+		serverDH.generateKeys();
+	
+		var serial = _this._serialRack();
 
-	var serial = hat.rack();
-	
-	// Response with public key, serial, and expires.
-	res.send({
-		publicKey: serverDH.getPublicKey(),
-		serial: serial,
-		expires: this._options.ttl
-	});
-	
-	process.nextTick(function () {
-		// save Diffie-hellman key to cache.
-		var dhKey = serverDH.computeSecret(req.body.publicKey, null);
-		this._dhKeys.set(serial, dhKey);
-	});
+		// Response with public key, serial, and expires.
+		res.send({
+			publicKey: serverDH.getPublicKey('base64'),
+			serial: serial,
+			expires: _this._options.ttl
+		});
+		
+		process.nextTick(function () {
+			// save Diffie-hellman key to cache.
+			var dhKey = serverDH.computeSecret(req.body.publicKey, 'base64', 'base64');
+			_this._dhKeys.set(serial, dhKey);
+			next();
+		});
+	};
 };
 
-_Server.prototype.verification = function authenticationMiddleware(req, res, next) {
-	var cipherText = req.body.cipher,
-		serial = req.body.serial;
-	
-	if (!cipher || !serial) {
-		res.status(400).end();
-	}
-	
-	return this._dhKeys.getAsync(serial)
-	.then(function (dhKey) {
-		if (_.isUndefined(dhKey)) {
-			res.status(401).end();
-			return;
+_Server.prototype.verification = function () {
+	var _this = this;
+	return function authenticationMiddleware(req, res, next) {
+		var cipherText = req.body.cipher,
+			serial = req.body.serial;
+		
+		if (!cipherText || !serial) {
+			res.status(400).end();
 		}
+		
+		return _this._dhKeys.getAsync(serial)
+		.then(function (dhKey) {
+			if (_.isUndefined(dhKey)) {
+				res.status(401).end();
+				return;
+			}
+	
+			// Decipher cipher text and parse it as JSON.
+			var decipher = crypto.createDecipher(_this._options.cipherName, dhKey);
+			var plainText = decipher.update(cipherText, 'base64', 'utf8');
+			plainText += decipher.final('utf8');
+			var clientMessage = JSON.parse(plainText);
 
-		// Decipher cipher text and parse it as JSON.
-		var decipher = crypto.createDecipher(this._options.cipherName, dhKey);
-		decipher.update(cipherText, 'base64');
-		var plainText = decipher.final('utf8');
-		var clientMessage = JSON.parse(plainText);
-
-		// Check key.
-		if (this._options.password !== clientMessage[1]) {
-			res.status(401).end();
-			throw new Error();
-		}
-
-		// Return original message.
-		return clientMessage[0];
-	})
-	.then(next)
-	.catch(next);
+			// Check key.
+			if (_this._options.password !== clientMessage[1]) {
+				res.status(401).end();
+				throw new Error();
+			}
+	
+			// Return original message.
+			req.body = clientMessage[0];
+			next();
+		})
+		.catch(next);
+	};
 };
 
 module.exports = {
