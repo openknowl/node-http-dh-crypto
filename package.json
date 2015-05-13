@@ -1,0 +1,31 @@
+{
+  "name": "node-http-dh-crypto",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:openknowl/node-http-dh-crypto.git"
+  },
+  "description": "secure data passing between http servers",
+  "bugs": {
+    "url": "https://github.com/openknowl/node-http-dh-crypto/issues"
+  },
+  "homepage": "https://github.com/openknowl/node-http-dh-crypto",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "diffiehellman",
+    "crypto",
+    "http"
+  ],
+  "author": "openknowl (https://www.openknowl.com)",
+  "license": "MIT",
+  "dependencies": {
+    "bluebird": "^2.9.25",
+    "hat": "0.0.3",
+    "lodash": "^3.8.0",
+    "node-cache": "^2.1.1",
+    "request": "^2.55.0"
+  }
+}
