@@ -21,7 +21,7 @@ var bodyParser = require('body-parser');
 var dhCryptoClient = dhCrypto.createClient({
 	password: 'the_cake_is_a_lie!',
 	host: 'http://localhost:3001',
-	establishPath: '/api/establish',
+	establishPath: '/establish',
 	establishMethod: 'POST'
 });
 
