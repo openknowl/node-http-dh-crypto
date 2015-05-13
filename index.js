@@ -14,7 +14,7 @@ var crypto = require('crypto'),
 
 // External libraries.
 var Promise = require('bluebird'),
-	lodash = require('lodash'),
+	_ = require('lodash'),
 	request = Promise.promisify(require('request'));
 
 // Options
@@ -35,44 +35,67 @@ var defaultOptions = {
 var _Client = function DHCryptoClient(options) {
 	this._established = false;
 	this._dhKey = null;
-	this._options = options;
+	this._serial = null;
+	this._options = _.defaults(options, defaultOptions);
+	this._keyTimeout = null;
 };
 
 _Client.prototype.establish = function () {
 	// Generate Diffie-hellman key.
 	var clientDH = crypto.getDiffieHellman(this._options.dhGroupName);
-	clientDH = generateKeys();
+	clientDH.generateKeys();
+	
+	var startTime = new Date();
 
 	return request({
 		method: this._options.establishMethod, 
-		uri: this._options.establishUri
+		uri: this._options.establishUri,
 		form: {
 			publicKey: clientDH.getPublicKey()
 		}
 	})
 	.spread(function (response, body) {
 		if (response.statusCode === 200) {
-			var body = JSON.parse(body);
+			body = JSON.parse(body);
 
-			dhKey = clientDH.computeSecret(body.publicKey, null);
-			return dhKey;
+			// Update connection variables.
+			this._dhKey = clientDH.computeSecret(body.publicKey, null);
+			this._serial = body.serial;
+			this._established = true;
+
+			// Set expiry timeout for connection variables..
+			if (!_.isNull(this._keyTimeout)) {
+				clearTimeout(this._keyTimeout);
+			}
+
+			var endTime = new Date();
+			var diff = endTime.valueOf() - startTime.valueOf() + 10;
+
+			this._keyTimeout = setTimeout(function () {
+				this._established = false;
+				this._dhKey = null;
+				this._dhKey = 
+				this._keyTimeout = null;
+			}, (body.expires * 1000) - diff);
+
+			// Return Diffie-hellman key and a serial.
+			return {
+				dhKey: this._dhKey,
+				serial: this._serial
+			};
 		}
 
 		else {
-			throw new Error('Server responded http %d.', response.statusCode);
+			throw new Error('dh-crypto-server responded with status code %d.', response.statusCode);
 		}
 	});
 };
 
 _Client.prototype.request = function (requestOptions) {
-	var connection = (established)? Promise.resolve() : this.establish();
+	var connection = (this._established)? Promise.resolve() : this.establish();
 
 	return connection
 	.then(function () {
-		if (!_.isObject(requestOptions.header)) {
-			requestOptions.header = {};
-		}
-
 		// Create cipher string and replace post body.
 		var cipher = crypto.createCipher(this._options.cipherName, this._dhKey);
 
@@ -83,26 +106,30 @@ _Client.prototype.request = function (requestOptions) {
 
 		cipher.update(JSON.stringify(rawData), 'utf-8');
 		
-		reqeustOptions.form = {
-			cipher: cipher.final('base64')
+		requestOptions.form = {
+			cipher: cipher.final('base64'),
+			serial: this._serial
 		};
 
-		requestOptions.header[this._options.requestHeaderName] = ;
-
+		// Send request with these options.
 		return request(requestOptions);
 	});
 };
 
-
-
 /**
  * Class Server
  */
-var _Server = function DHCryptoServer() {
-
+var _Server = function DHCryptoServer(options) {
+	this._dhKeys = null;
+	this._options = _.defaults(options, defaultOptions);
 };
 
-
-
 module.exports = {
+	createClient: function (options) {
+		return new _Client(options);
+	},
+
+	createServer: function (options) {
+		return new _Server(options);
+	}
 };
