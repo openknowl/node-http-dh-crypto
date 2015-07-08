@@ -92,7 +92,7 @@ _Client.prototype.establish = function () {
 		}
 
 		else {
-			throw new Error('dh-crypto-server responded with status code %d.', response.statusCode);
+			throw new Error('dh-crypto-server responded with status code ' + response.statusCode);
 		}
 	});
 };
