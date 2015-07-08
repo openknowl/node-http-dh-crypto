@@ -98,6 +98,9 @@ _Client.prototype.establish = function () {
 };
 
 _Client.prototype.request = function (requestOptions) {
+	// Clone request option not to influence to the outer scope.
+	requestOptions = _.cloneDeep(requestOptions);
+	
 	var _this = this;
 	
 	var connection = (_this._established)? Promise.resolve() : _this.establish();
